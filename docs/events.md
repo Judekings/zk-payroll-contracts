@@ -1041,3 +1041,72 @@ Quick-reference: which consumer types should subscribe to which domain.
 | `pause_manager` contract | `contracts/pause_manager/src/lib.rs` |
 | `proof_verifier` contract | `contracts/proof_verifier/src/lib.rs` |
 | Legacy `payroll` contract | `contracts/payroll/src/lib.rs` |
+
+---
+
+## Events Added by Issues #349, #269, #255, #252
+
+### Scoped Emergency Pause Events (#349)
+
+These events are emitted by `contracts/payroll/src/scoped_pause.rs` when an
+authorized admin activates or clears a per-scope pause. Each scope
+(`Funding`, `Approval`, `Execution`, `Audit`, `Archival`) is controlled
+independently — pausing `Execution` never affects `Audit`.
+
+| Event | Topics | Data | Notes |
+|-------|--------|------|-------|
+| `scope_paused` | `("payroll", "scope_paused", scope_name)` | `()` | Emitted by `activate_scope_pause`; idempotent (no duplicate emit). |
+| `scope_cleared` | `("payroll", "scope_cleared", scope_name)` | `()` | Emitted by `clear_scope_pause`; no-op if scope was not paused. |
+
+`scope_name` is one of: `Funding`, `Approval`, `Execution`, `Audit`, `Archival`.
+
+Privacy: no employee addresses, salary amounts, or commitment hashes appear in
+these events.
+
+### Employee Wallet Update Event (#269)
+
+Emitted by `payroll_registry` when `update_payout_destination` or
+`update_payout_destination_wallet` succeeds.
+
+| Event | Topics | Data | Notes |
+|-------|--------|------|-------|
+| `PayoutDestinationUpdated` | `("PayoutDestinationUpdated", company_id: u64, employee: Address)` | `(old_dest: Address, new_dest: Address)` | Never contains salary values or commitment hashes. |
+
+- A rejected update (invalid wallet format, duplicate destination, zero
+  address) emits **no event**.
+- Off-chain indexers can correlate the `employee` topic with their own
+  permissioned records; the event itself reveals only addresses, not salary.
+
+### Fee Reserve Validation (#255)
+
+Fee reserve validation runs as a pure-Rust guard before payroll execution.
+No on-chain event is emitted for successful validations; failures are
+signalled via panics using typed `FeeReserveError` codes. See
+`docs/treasury.md#fee-reserve-requirements` for the reserve formula and
+configuration guide.
+
+Error code strings (from `FeeReserveError::as_str()`):
+
+| Code | Meaning |
+|------|---------|
+| `insufficient_fee_reserve` | Treasury balance after payroll is below the required reserve. |
+| `invalid_fee_config` | `required_fee_reserve` is negative — deployer configuration error. |
+| `non_positive_payroll_total` | Payroll total is zero or negative. |
+
+### Admin Action Events (#252)
+
+All sensitive admin actions on `payroll_registry` emit structured events.
+These supplement the `payroll` contract's `config_changed` events (#490).
+
+| Event | Contract | Topics | Data |
+|-------|----------|--------|------|
+| `CompanyAdminProposed` | `payroll_registry` | `(Symbol, company_id: u64, current_admin: Address)` | `(proposed_admin: Address,)` |
+| `CompanyAdminRotated` | `payroll_registry` | `(Symbol, company_id: u64, old_admin: Address)` | `(new_admin: Address,)` |
+| `CompanyAdminRotCancelled` | `payroll_registry` | `(Symbol, company_id: u64, caller: Address)` | `()` |
+| `EmployeeRemoved` | `payroll_registry` | `(Symbol, company_id: u64, employee: Address)` | `()` |
+| `CommitmentUpdated` | `payroll_registry` | `(Symbol, company_id: u64, employee: Address)` | `(new_commitment: BytesN<32>,)` |
+
+Privacy guarantee: none of the above events carry salary values, blinding
+factors, or private payroll run data. The `CommitmentUpdated` event carries
+the new commitment hash (already public in the registry) but never the
+underlying salary amount.

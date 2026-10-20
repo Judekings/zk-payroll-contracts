@@ -141,6 +141,13 @@ pub use treasury_reservation::{
     ReservationIssue, ReservationOutcome,
 };
 
+/// Fee reserve validation (#255).
+pub mod fee_reserve_validation;
+pub use fee_reserve_validation::{
+    compute_effective_fee_reserve, validate_fee_reserve, FeeReserveConfig, FeeReserveError,
+    FeeReserveValidation,
+};
+
 /// Multi-batch execution progress tracking (#643).
 pub mod multi_batch_progress;
 pub use multi_batch_progress::{
@@ -161,6 +168,11 @@ pub use cross_currency_rounding::{
     convert_with_rounding_safeguards, ConversionResult, CrossCurrencyConversionConfig,
     RoundingMode, RoundingSafeguardError,
 };
+
+/// Scoped emergency pause recovery (#349).
+pub mod scoped_pause;
+pub use scoped_pause::{activate_scope_pause, assert_scope_active, clear_scope_pause,
+    is_scope_paused, PauseScope};
 
 /// Emergency payroll pause authorization (#698).
 pub mod emergency_pause_authorization;
@@ -1913,6 +1925,33 @@ impl Payroll {
             .persistent()
             .set(&DataKey::StalledRunRecoveryMarker(run_id), &assessment);
         assessment
+    }
+
+    // ── Issue #349: scoped emergency pause recovery ──────────────────────────
+
+    /// Pause a specific execution scope (#349).
+    ///
+    /// Only the admin may activate a scope pause. Emits
+    /// `("payroll", "scope_paused", scope_name)`.
+    pub fn activate_scope_pause(e: Env, admin: Address, scope: PauseScope) {
+        Self::require_admin(&e, &admin);
+        scoped_pause::activate_scope_pause(&e, &admin, scope);
+    }
+
+    /// Lift a previously activated scope pause (#349).
+    ///
+    /// Only the admin may clear a scope pause. Emits
+    /// `("payroll", "scope_cleared", scope_name)`.
+    pub fn clear_scope_pause(e: Env, admin: Address, scope: PauseScope) {
+        Self::require_admin(&e, &admin);
+        scoped_pause::clear_scope_pause(&e, &admin, scope);
+    }
+
+    /// Return `true` if the given execution scope is currently paused (#349).
+    ///
+    /// Read-only and safe to call from any context.
+    pub fn is_scope_paused(e: Env, scope: PauseScope) -> bool {
+        scoped_pause::is_scope_paused(&e, scope)
     }
 
     // ── Issue #620: contract execution initiator authorization ─────────────
